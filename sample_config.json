@@ -1,0 +1,8 @@
+{
+  "api_url": "https://some_url.com/v1/endpoint",
+  "disable_collection": true,
+  "batch_size": null,
+  "auth_token": null,
+  "allowed_keys": ["a", "b"],
+  "request_timeout": 10
+}
