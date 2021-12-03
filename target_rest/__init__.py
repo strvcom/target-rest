@@ -8,6 +8,7 @@ import json
 import threading
 import http.client
 import urllib
+import requests
 from datetime import datetime
 import collections
 
@@ -33,7 +34,16 @@ def flatten(d, parent_key='', sep='__'):
         else:
             items.append((new_key, str(v) if type(v) is list else v))
     return dict(items)
-        
+
+def send_data(data, url):
+    # TODO: Handle authentification
+    r = requests.post(url, json=data)
+
+    # TODO: Handle response codes and react based on what gets back
+    if r.status_code == 200:
+        return True
+    return False
+
 def persist_lines(config, lines):
     state = None
     schemas = {}
@@ -67,12 +77,9 @@ def persist_lines(config, lines):
             # Validate record
             validators[o['stream']].validate(o['record'])
 
-            # If the record needs to be flattened, uncomment this line
-            flattened_record = flatten(o['record'])
-            
-            # TODO: Process Record message here..
-            print(o['record'])
-            print(flattened_record)
+            # TODO: IMplement batching
+            # Send data to REST server
+            send_data(o['record'], config['api_url'])
 
             state = None
         elif t == 'STATE':
@@ -129,6 +136,8 @@ def main():
                     'To disable sending anonymous usage data, set ' +
                     'the config parameter "disable_collection" to true')
         threading.Thread(target=send_usage_stats).start()
+
+    # TODO: Check if api_url is in config
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
     state = persist_lines(config, input)
