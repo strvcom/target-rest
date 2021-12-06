@@ -37,6 +37,7 @@ def flatten(d, parent_key='', sep='__'):
 
 def send_data(data, url):
     # TODO: Handle authentification
+    # TODO: Handle bad URL and issues with REST server
     r = requests.post(url, json=data)
 
     # TODO: Handle response codes and react based on what gets back
@@ -56,47 +57,47 @@ def persist_lines(config, lines):
     # Loop over lines from stdin
     for line in lines:
         try:
-            o = json.loads(line)
+            json_object = json.loads(line)
         except json.decoder.JSONDecodeError:
             logger.error("Unable to parse:\n{}".format(line))
             raise
 
-        if 'type' not in o:
+        if 'type' not in json_object:
             raise Exception("Line is missing required key 'type': {}".format(line))
-        t = o['type']
+        message_type = json_object['type']
 
-        if t == 'RECORD':
-            if 'stream' not in o:
+        if message_type == 'RECORD':
+            if 'stream' not in json_object:
                 raise Exception("Line is missing required key 'stream': {}".format(line))
-            if o['stream'] not in schemas:
-                raise Exception("A record for stream {} was encountered before a corresponding schema".format(o['stream']))
+            if json_object['stream'] not in schemas:
+                raise Exception("A record for stream {} was encountered before a corresponding schema".format(json_object['stream']))
 
             # Get schema for this record's stream
-            schema = schemas[o['stream']]
+            schema = schemas[json_object['stream']]
 
             # Validate record
-            validators[o['stream']].validate(o['record'])
+            validators[json_object['stream']].validate(json_object['record'])
 
-            # TODO: IMplement batching
+            # TODO: Implement batching
             # Send data to REST server
-            send_data(o['record'], config['api_url'])
+            send_data(json_object['record'], config['api_url'])
 
             state = None
-        elif t == 'STATE':
-            logger.debug('Setting state to {}'.format(o['value']))
-            state = o['value']
-        elif t == 'SCHEMA':
-            if 'stream' not in o:
+        elif message_type == 'STATE':
+            logger.debug('Setting state to {}'.format(json_object['value']))
+            state = json_object['value']
+        elif message_type == 'SCHEMA':
+            if 'stream' not in json_object:
                 raise Exception("Line is missing required key 'stream': {}".format(line))
-            stream = o['stream']
-            schemas[stream] = o['schema']
-            validators[stream] = Draft4Validator(o['schema'])
-            if 'key_properties' not in o:
+            stream = json_object['stream']
+            schemas[stream] = json_object['schema']
+            validators[stream] = Draft4Validator(json_object['schema'])
+            if 'key_properties' not in json_object:
                 raise Exception("key_properties field is required")
-            key_properties[stream] = o['key_properties']
+            key_properties[stream] = json_object['key_properties']
         else:
             raise Exception("Unknown message type {} in message {}"
-                            .format(o['type'], o))
+                            .format(json_object['type'], json_object))
     
     return state
 
