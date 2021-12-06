@@ -36,6 +36,12 @@ def flatten(d, parent_key='', sep='__'):
     return dict(items)
 
 def send_data(data, url):
+    """
+    Send json data to REST endpoint at url
+    :param data: JSON encoded data to be sent
+    :param url: URL of endpoint where to send the data
+    :return: True there was no problem during sending and response code 200 is returned False otherwise
+    """
     # TODO: Handle authentification
     # TODO: Handle bad URL and issues with REST server
     r = requests.post(url, json=data)
@@ -45,27 +51,52 @@ def send_data(data, url):
         return True
     return False
 
+def batch_data(data_container, new_data):
+    """
+    Adds new data into the batch for batch processing
+    :param data_container: Dictionary with batched data
+    :param new_data: New data to be added to the batch
+    :return: Number of items currently in batch after new data was inserted
+    """
+    data_keys = list(new_data.keys())
+    # TODO: Make this safer (i.e. when the keys are missing and so on)
+    if len(data_container) == 0:
+        # If data container is empty, create structure for it
+        for key in data_keys:
+            data_container[key] = [new_data[key]]
+    else:
+        # Else add new data to lists
+        for key in data_keys:
+            data_container[key].append(new_data[key])
+    return len(data_container[key])
+
 def persist_lines(config, lines):
     state = None
     schemas = {}
     key_properties = {}
     headers = {}
     validators = {}
+
+    batch_size = config.get('batch_size', None)
+    data = {}
     
     now = datetime.now().strftime('%Y%m%dT%H%M%S')
 
     # Loop over lines from stdin
     for line in lines:
+        # Trye to parse json data
         try:
             json_object = json.loads(line)
         except json.decoder.JSONDecodeError:
             logger.error("Unable to parse:\n{}".format(line))
             raise
-
+        
+        # Get type of message
         if 'type' not in json_object:
             raise Exception("Line is missing required key 'type': {}".format(line))
         message_type = json_object['type']
 
+        # Handle single record in message
         if message_type == 'RECORD':
             if 'stream' not in json_object:
                 raise Exception("Line is missing required key 'stream': {}".format(line))
@@ -78,9 +109,17 @@ def persist_lines(config, lines):
             # Validate record
             validators[json_object['stream']].validate(json_object['record'])
 
-            # TODO: Implement batching
+
             # Send data to REST server
-            send_data(json_object['record'], config['api_url'])
+            if batch_size is None or batch_size == 1:
+                # Send one line of data for no batching
+                send_data(json_object['record'], config['api_url'])
+            else:
+                # Batch data 
+                data_length = batch_data(data, json_object['record'])
+                if data_length >= batch_size:
+                    send_data(data, config['api_url'])
+                    data = {}
 
             state = None
         elif message_type == 'STATE':
@@ -98,6 +137,11 @@ def persist_lines(config, lines):
         else:
             raise Exception("Unknown message type {} in message {}"
                             .format(json_object['type'], json_object))
+    
+    # Send last batch that is smaller than batch_size (for cases when data_size % batch_size != 0)
+    # TODO: This seem a little slopy, maybe better would be cover this directly in loop over the lines
+    if len(data) >= 0 and batch_size is not None and batch_size > 1:
+        send_data(data, config['api_url'])
     
     return state
 
