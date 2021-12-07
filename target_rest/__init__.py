@@ -16,6 +16,8 @@ import pkg_resources
 from jsonschema.validators import Draft4Validator
 import singer
 
+REQUIRED_CONFIG_KEYS = ["api_url"]
+
 logger = singer.get_logger()
 
 def emit_state(state):
@@ -190,7 +192,7 @@ def main():
                     'the config parameter "disable_collection" to true')
         threading.Thread(target=send_usage_stats).start()
 
-    # TODO: Check if api_url is in config
+    singer.utils.check_config(config, REQUIRED_CONFIG_KEYS)
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
     state = persist_lines(config, input)
