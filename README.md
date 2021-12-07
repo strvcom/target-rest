@@ -26,3 +26,7 @@ Description of configuration keys:
 * `auth_token` - authorization token
 * `allowed_keys` - keys from input JSON that should be propagated to the REST API
 * `request_timeout` - time for one request in seconds
+
+## Testing
+
+There are no automatic tests yet, but you can find the instructions for manual testing in the folder [test](test)
