@@ -40,16 +40,18 @@ def send_data(data, url):
     Send json data to REST endpoint at url
     :param data: JSON encoded data to be sent
     :param url: URL of endpoint where to send the data
-    :return: True there was no problem during sending and response code 200 is returned False otherwise
     """
     # TODO: Handle authentification
     # TODO: Handle bad URL and issues with REST server
     r = requests.post(url, json=data)
 
-    # TODO: Handle response codes and react based on what gets back
-    if r.status_code == 200:
-        return True
-    return False
+    # If the response is not OK rise exception
+    if not r.ok:
+        raise Exception(f'REST API on {url} returned status code {r.status_code}')
+
+    # TODO: r.ok is True for status_code < 400. 
+    # Think about status_codes < 400 that can couse problems like `204 - No content` and handle them
+    # https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
 
 def batch_data(data_container, new_data):
     """
@@ -71,6 +73,12 @@ def batch_data(data_container, new_data):
     return len(data_container[key])
 
 def persist_lines(config, lines):
+    """
+    Sends data to server line by line or in batches if `bat_size` in configuration is set.
+    :param config: Target configuration
+    :param lines: Lines with JSON data from tap
+    :return: last state
+    """
     state = None
     schemas = {}
     key_properties = {}
@@ -84,61 +92,55 @@ def persist_lines(config, lines):
 
     # Loop over lines from stdin
     for line in lines:
-        # Trye to parse json data
+        # Try to parse json data
         try:
-            json_object = json.loads(line)
+            message = singer.parse_message(line)
         except json.decoder.JSONDecodeError:
             logger.error("Unable to parse:\n{}".format(line))
             raise
         
-        # Get type of message
-        if 'type' not in json_object:
-            raise Exception("Line is missing required key 'type': {}".format(line))
-        message_type = json_object['type']
-
         # Handle single record in message
-        if message_type == 'RECORD':
-            if 'stream' not in json_object:
-                raise Exception("Line is missing required key 'stream': {}".format(line))
-            if json_object['stream'] not in schemas:
+        if  isinstance(message, singer.RecordMessage):
+            stream = message.stream
+
+            if stream not in schemas:
                 raise Exception("A record for stream {} was encountered before a corresponding schema".format(json_object['stream']))
 
             # Get schema for this record's stream
-            schema = schemas[json_object['stream']]
+            schema = schemas[stream]
+
+            # Get the record from message
+            record = message.record
 
             # Validate record
-            validators[json_object['stream']].validate(json_object['record'])
-
+            validators[stream].validate(record)
 
             # Send data to REST server
             if batch_size is None or batch_size == 1:
-                # Send one line of data for no batching
-                send_data(json_object['record'], config['api_url'])
+                # Send one line of data if no batching is configured
+                send_data(record, config['api_url'])
             else:
-                # Batch data 
-                data_length = batch_data(data, json_object['record'])
+                #Otherwise batch data and send once there is enough in container
+                data_length = batch_data(data, record)
                 if data_length >= batch_size:
                     send_data(data, config['api_url'])
                     data = {}
 
             state = None
-        elif message_type == 'STATE':
-            logger.debug('Setting state to {}'.format(json_object['value']))
-            state = json_object['value']
-        elif message_type == 'SCHEMA':
-            if 'stream' not in json_object:
-                raise Exception("Line is missing required key 'stream': {}".format(line))
-            stream = json_object['stream']
-            schemas[stream] = json_object['schema']
-            validators[stream] = Draft4Validator(json_object['schema'])
-            if 'key_properties' not in json_object:
-                raise Exception("key_properties field is required")
-            key_properties[stream] = json_object['key_properties']
+
+        elif isinstance(message, singer.StateMessage):
+            state = message.value
+            logger.debug(f'Setting state to {state}')
+
+        elif isinstance(message, singer.SchemaMessage):
+            stream = message.stream
+            schemas[stream] = message.schema
+            validators[stream] = Draft4Validator(message.schema)
+            key_properties[stream] = message.key_properties
         else:
-            raise Exception("Unknown message type {} in message {}"
-                            .format(json_object['type'], json_object))
+            raise Exception(f'Unknown message type {message.type} in message {message}')
     
-    # Send last batch that is smaller than batch_size (for cases when data_size % batch_size != 0)
+    # Send last batch that is smaller then batch_size (for cases when data_size % batch_size != 0)
     # TODO: This seem a little slopy, maybe better would be cover this directly in loop over the lines
     if len(data) >= 0 and batch_size is not None and batch_size > 1:
         send_data(data, config['api_url'])
@@ -147,6 +149,9 @@ def persist_lines(config, lines):
 
 
 def send_usage_stats():
+    """
+    Send anonymous usage data to singer.io
+    """
     try:
         version = pkg_resources.get_distribution('target-rest-api').version
         conn = http.client.HTTPConnection('collector.singer.io', timeout=10)
@@ -166,6 +171,9 @@ def send_usage_stats():
 
 
 def main():
+    """
+    Main function that parse configuration and start sending data to REST server
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', help='Config file')
     args = parser.parse_args()
