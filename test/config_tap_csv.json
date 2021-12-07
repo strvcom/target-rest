@@ -1,0 +1,8 @@
+{
+	"files":	[ 	
+					{	"entity" : "test_output",
+						"file" : "test/test.csv",
+						"keys" : ["a", "b"]
+					}
+				]
+}

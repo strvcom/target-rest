@@ -1,0 +1,6 @@
+{
+    "disable_collection": true,
+    "api_url": "http://localhost:5000/test",
+    "batch_size": null,
+    "auth_token": null
+}

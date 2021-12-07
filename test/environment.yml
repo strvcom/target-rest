@@ -1,0 +1,12 @@
+name: target-rest-test
+channels:
+    - conda-forge
+    - defaults
+dependencies:
+  - python>=3.7,<3.9
+  - pip==21.2.4
+  - flask
+  - pip:
+      - singer-python
+      - requests
+      - git+https://github.com/robertjmoore/tap-csv
