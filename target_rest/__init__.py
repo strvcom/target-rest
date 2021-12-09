@@ -139,6 +139,15 @@ def persist_lines(config, lines):
             schemas[stream] = message.schema
             validators[stream] = Draft4Validator(message.schema)
             key_properties[stream] = message.key_properties
+        elif isinstance(message, singer.ActivateVersionMessage):
+            # This is a signal to the Target that it should delete all previously
+            # seen data and replace it with all the RECORDs it has seen where the
+            # record's version matches this version number.
+            
+            # TODO: To implement this could be tricky. We would need specific enpoint 
+            # that would delete all
+            
+            logger.warning('Ignoring ActivateVersionMessage')
         else:
             raise Exception(f'Unknown message type {message.type} in message {message}')
     
