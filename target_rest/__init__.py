@@ -109,24 +109,22 @@ def send_data(data, url):
     # Think about status_codes < 400 that can couse problems like `204 - No content` and handle them
     # https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
 
-def batch_data(data_container, new_data):
+def get_batch_size(config):
     """
-    Adds new data into the batch for batch processing
-    :param data_container: Dictionary with batched data
-    :param new_data: New data to be added to the batch
-    :return: Number of items currently in batch after new data was inserted
+    Returns batch size.
+    If there is no batch size in config or if it is set to `null` or
+    if it is set to invalid value (0, negative value, float, string, ...) it will set 
+    batch size to 1 otherwise it will return the value set in configuration.
+    :param config: Configuration dictionary
+    :return: Valid batch size
     """
-    data_keys = list(new_data.keys())
-    # TODO: Make this safer (i.e. when the keys are missing and so on)
-    if len(data_container) == 0:
-        # If data container is empty, create structure for it
-        for key in data_keys:
-            data_container[key] = [new_data[key]]
-    else:
-        # Else add new data to lists
-        for key in data_keys:
-            data_container[key].append(new_data[key])
-    return len(data_container[key])
+    batch_size = config.get('batch_size', None)
+    if not isinstance(batch_size, int):
+        batch_size = 1
+    if batch_size < 1:
+        batch_size = 1
+    return batch_size
+
 
 def persist_lines(config, lines):
     """
@@ -141,8 +139,9 @@ def persist_lines(config, lines):
     headers = {}
     validators = {}
 
-    batch_size = config.get('batch_size', None)
-    data = {}
+    batch_size = get_batch_size(config)
+
+    data = []
     
     now = datetime.now().strftime('%Y%m%dT%H%M%S')
 
@@ -172,15 +171,10 @@ def persist_lines(config, lines):
             validators[stream].validate(float_to_decimal(record))
 
             # Send data to REST server
-            if batch_size is None or batch_size == 1:
-                # Send one line of data if no batching is configured
-                send_data(record, config['api_url'])
-            else:
-                #Otherwise batch data and send once there is enough in container
-                data_length = batch_data(data, record)
-                if data_length >= batch_size:
-                    send_data(data, config['api_url'])
-                    data = {}
+            data.append(record)
+            if len(data) >= batch_size:
+                send_data(data, config['api_url'])
+                data = []
 
             state = None
 
@@ -212,7 +206,7 @@ def persist_lines(config, lines):
     
     # Send last batch that is smaller then batch_size (for cases when data_size % batch_size != 0)
     # TODO: This seem a little slopy, maybe better would be cover this directly in loop over the lines
-    if len(data) >= 0 and batch_size is not None and batch_size > 1:
+    if len(data) > 0:
         send_data(data, config['api_url'])
     
     return state
