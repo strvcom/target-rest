@@ -115,7 +115,7 @@ def persist_lines(config, lines):
             record = message.record
 
             # Validate record
-            validators[stream].validate(record)
+            # validators[stream].validate(record)
 
             # Send data to REST server
             if batch_size is None or batch_size == 1:
