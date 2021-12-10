@@ -10,7 +10,10 @@ import http.client
 import urllib
 import requests
 from datetime import datetime
+from decimal import Decimal
+import decimal
 import collections
+import math
 
 import pkg_resources
 from jsonschema.validators import Draft4Validator
@@ -19,6 +22,57 @@ import singer
 REQUIRED_CONFIG_KEYS = ["api_url"]
 
 logger = singer.get_logger()
+
+def float_to_decimal(value):
+    '''
+    Walk the given data structure and turn all instances of float 
+    into double.
+    '''
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, list):
+        return [float_to_decimal(child) for child in value]
+    if isinstance(value, dict):
+        return {k: float_to_decimal(v) for k, v in value.items()}
+    return value
+
+
+def numeric_schema_with_precision(schema):
+    if 'type' not in schema:
+        return False
+    if isinstance(schema['type'], list):
+        if 'number' not in schema['type']:
+            return False
+    elif schema['type'] != 'number':
+        return False
+    if 'multipleOf' in schema:
+        return True
+    return 'minimum' in schema or 'maximum' in schema
+
+
+def get_precision(key, schema):
+    v = abs(Decimal(schema.get(key, 1))).log10()
+    if v < 0:
+        return round(math.floor(v))
+    return round(math.ceil(v))
+
+
+def walk_schema_for_numeric_precision(schema):
+    if isinstance(schema, list):
+        for v in schema:
+            walk_schema_for_numeric_precision(v)
+    elif isinstance(schema, dict):
+        if numeric_schema_with_precision(schema):
+            scale = -1 * get_precision('multipleOf', schema)
+            digits = max(get_precision('minimum', schema), get_precision('maximum', schema))
+            precision = digits + scale
+            if decimal.getcontext().prec < precision:
+                logger.debug('Setting decimal precision to {}'.format(precision))
+                decimal.getcontext().prec = precision
+        else:
+            for v in schema.values():
+                walk_schema_for_numeric_precision(v)
+
 
 def emit_state(state):
     if state is not None:
@@ -109,13 +163,13 @@ def persist_lines(config, lines):
                 raise Exception("A record for stream {} was encountered before a corresponding schema".format(json_object['stream']))
 
             # Get schema for this record's stream
-            schema = schemas[stream]
+            schema = float_to_decimal(schemas[stream])
 
             # Get the record from message
             record = message.record
 
             # Validate record
-            # validators[stream].validate(record)
+            validators[stream].validate(float_to_decimal(record))
 
             # Send data to REST server
             if batch_size is None or batch_size == 1:
@@ -137,8 +191,13 @@ def persist_lines(config, lines):
         elif isinstance(message, singer.SchemaMessage):
             stream = message.stream
             schemas[stream] = message.schema
+            schema = float_to_decimal(schemas[stream])
+            
+            walk_schema_for_numeric_precision(schema)
+
             validators[stream] = Draft4Validator(message.schema)
             key_properties[stream] = message.key_properties
+
         elif isinstance(message, singer.ActivateVersionMessage):
             # This is a signal to the Target that it should delete all previously
             # seen data and replace it with all the RECORDs it has seen where the
